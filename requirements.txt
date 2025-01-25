@@ -11,3 +11,4 @@ pdfplumber
 tabula-py
 tabulate
 numpy
+sentence-transformers
