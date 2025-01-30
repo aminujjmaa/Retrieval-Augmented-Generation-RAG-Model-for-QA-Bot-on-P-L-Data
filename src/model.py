@@ -25,6 +25,8 @@ from pdfplumber import open as plumber_open
 import pdfplumber
 from typing import Dict, List, Any
 import numpy as np
+from handlers import handle_pdf, handle_excel, handle_powerpoint, handle_image
+from PIL import Image
 
 # Load environment variables
 load_dotenv()
@@ -609,3 +611,121 @@ def create_conversational_rag_chain(retriever):
     )
 
     return conversational_rag_chain
+
+def load_documents(uploaded_files):
+    """
+    Enhanced document loader for multiple file types
+    """
+    documents = []
+    all_tables = []
+    all_images = []
+    processing_errors = []
+    
+    for uploaded_file in uploaded_files:
+        try:
+            file_type = uploaded_file.name.split('.')[-1].lower()
+            
+            if file_type in ['pdf']:
+                docs, tables = handle_pdf(uploaded_file)
+                documents.extend(docs)
+                all_tables.extend(tables)
+            
+            elif file_type in ['xlsx', 'xls']:
+                docs, tables = handle_excel(uploaded_file)
+                documents.extend(docs)
+                all_tables.extend(tables)
+            
+            elif file_type in ['ppt', 'pptx']:
+                docs = handle_powerpoint(uploaded_file)
+                documents.extend(docs)
+            
+            elif file_type in ['png', 'jpg', 'jpeg']:
+                try:
+                    docs, images = handle_image(uploaded_file)
+                    if docs:
+                        documents.extend(docs)
+                    if images:
+                        all_images.extend(images)
+                    if not docs and not images:
+                        processing_errors.append(f"No content could be extracted from image: {uploaded_file.name}")
+                except RuntimeError as e:
+                    processing_errors.append(f"Error processing image {uploaded_file.name}: {str(e)}")
+                    # Still try to store the image even if OCR fails
+                    try:
+                        image = Image.open(uploaded_file)
+                        all_images.append({
+                            "image": image,
+                            "text": "OCR processing failed",
+                            "source": uploaded_file.name,
+                            "type": "image"
+                        })
+                    except Exception as img_e:
+                        processing_errors.append(f"Could not load image {uploaded_file.name}: {str(img_e)}")
+            
+        except Exception as e:
+            processing_errors.append(f"Error processing file {uploaded_file.name}: {str(e)}")
+            continue
+
+    # Check if we have any valid content
+    has_content = bool(documents or all_images)
+    if not has_content:
+        error_msg = "\n".join(processing_errors) if processing_errors else "No valid content could be extracted"
+        raise ValueError(error_msg)
+
+    # Process documents if we have any
+    if documents:
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200,
+            separators=["\n\n", "\n", ".", ";", ",", " ", ""],
+            length_function=len,
+            add_start_index=True
+        )
+
+        processed_documents = []
+        for doc in documents:
+            if doc.page_content.strip():
+                splits = text_splitter.split_documents([doc])
+                processed_documents.extend(splits)
+
+        # Create vector store if we have processed documents
+        if processed_documents:
+            vectorstore = FAISS.from_documents(
+                processed_documents,
+                embeddings
+            )
+            retriever = vectorstore.as_retriever(
+                search_type="mmr",
+                search_kwargs={
+                    "k": 6,
+                    "fetch_k": 30,
+                    "lambda_mult": 0.7
+                }
+            )
+        else:
+            # Create empty vectorstore for images-only case
+            vectorstore = FAISS.from_texts(
+                ["Image content present but no extractable text"],
+                embeddings
+            )
+            retriever = vectorstore.as_retriever()
+
+    else:
+        # Create empty vectorstore for images-only case
+        vectorstore = FAISS.from_texts(
+            ["Image content present but no extractable text"],
+            embeddings
+        )
+        retriever = vectorstore.as_retriever()
+
+    # Extract structured data
+    extracted_data = parse_document_data(documents, all_tables)
+
+    return {
+        "vectorstore": vectorstore,
+        "retriever": retriever,
+        "extracted_data": extracted_data,
+        "tables": all_tables,
+        "images": all_images,
+        "processing_errors": processing_errors
+    }

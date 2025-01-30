@@ -1,11 +1,26 @@
 import streamlit as st
-from model import (create_conversational_rag_chain, get_session_history, load_pdf_documents)
+import os
+from model import (create_conversational_rag_chain, get_session_history, load_documents)
 import pandas as pd
 
+# Configure Streamlit for larger file uploads
+st.set_page_config(
+    page_title="Document QA Bot",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Increase memory limits for file processing
+if not os.environ.get("STREAMLIT_SERVER_MAX_UPLOAD_SIZE"):
+    os.environ["STREAMLIT_SERVER_MAX_UPLOAD_SIZE"] = "2048"  # Size in MB (2GB)
+
+# Increase timeout for longer processing
+if not os.environ.get("STREAMLIT_SERVER_TIMEOUT"):
+    os.environ["STREAMLIT_SERVER_TIMEOUT"] = "300"  # Timeout in seconds
+
 # Streamlit UI
-st.set_page_config(page_title="Document QA Bot", layout="wide")
 st.markdown("<h1 style='color: #1E3D59;'>Document QA Bot</h1>", unsafe_allow_html=True)
-st.write("Upload PDFs and ask questions about any content - text, numbers, or tables.")
+st.write("Upload documents and ask questions about any content - text, tables, or images.")
 
 # Initialize session state
 if "store" not in st.session_state:
@@ -16,28 +31,45 @@ if "store" not in st.session_state:
 with st.sidebar:
     st.subheader("Upload Documents")
     uploaded_files = st.file_uploader(
-        "Upload PDFs",
-        type="pdf",
+        "Upload Documents",
+        type=["pdf", "xlsx", "xls", "ppt", "pptx", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
-        help="Upload one or more PDF files containing text, numbers, or tables"
+        help="Upload documents in PDF, Excel, PowerPoint, or image formats"
     )
 
 if uploaded_files:
     try:
         # Process uploaded documents
         with st.spinner("Processing documents..."):
-            documents = load_pdf_documents(uploaded_files)
+            documents = load_documents(uploaded_files)
             vectorstore, retriever, extracted_data = documents["vectorstore"], documents["retriever"], documents["extracted_data"]
+
+        # Display processing errors if any
+        if documents.get("processing_errors"):
+            st.warning("Some files had processing issues:")
+            for error in documents["processing_errors"]:
+                st.error(error)
 
         # Display tables in an expandable section
         if documents.get("tables"):
             with st.expander("View Extracted Tables", expanded=False):
                 for table in documents["tables"]:
                     if table.get("raw_data"):
-                        st.markdown(f"**Table from Page {table['page']}**")
+                        st.markdown(f"**Table from {table['source']} (Page/Sheet {table.get('page', 'N/A')})**")
                         df = pd.DataFrame(table["raw_data"])
                         st.dataframe(df, use_container_width=True)
                         st.markdown("---")
+
+        # Display images if present
+        if documents.get("images"):
+            with st.expander("View Extracted Images", expanded=False):
+                for img in documents["images"]:
+                    st.markdown(f"**Image from {img['source']}**")
+                    st.image(img["image"])
+                    if img.get("text"):
+                        st.markdown("**Extracted Text:**")
+                        st.text(img["text"])
+                    st.markdown("---")
 
         # Display extracted data in expandable sections
         if not extracted_data["text_content"].empty:
@@ -77,7 +109,7 @@ if uploaded_files:
 
         if user_input:
             if not documents["vectorstore"].docstore._dict:  # Check if there's actual content
-                st.warning("No document content was found to analyze. Please make sure your PDF contains readable text.")
+                st.warning("No document content was found to analyze. Please make sure your document contains readable text.")
             else:
                 with st.spinner("Analyzing..."):
                     session_history = get_session_history(session_id)
@@ -97,14 +129,14 @@ if uploaded_files:
 
     except Exception as e:
         st.error(f"""
-        Error processing the PDF document(s). This could be due to:
-        - The PDF contains no readable text or tables
-        - The PDF format is not supported
+        Error processing the document(s). This could be due to:
+        - The document contains no readable text or tables
+        - The document format is not supported
         - The document is password protected
         
         Error details: {str(e)}
         
-        Please try uploading a different PDF document.
+        Please try uploading a different document.
         """)
 
 else:
@@ -113,7 +145,7 @@ else:
     👋 Welcome to the Document QA Bot!
     
     To get started:
-    1. Upload any PDF document using the sidebar
+    1. Upload any document using the sidebar
     2. View the extracted data in the expandable section
     3. Ask questions about any content in the document
     
@@ -123,5 +155,5 @@ else:
     - What does the document say about [specific subject]?
     - Are there any trends or patterns in the data?
     
-    Note: Make sure your PDF contains readable text content.
+    Note: Make sure your document contains readable text content.
     """)
