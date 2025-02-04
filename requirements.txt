@@ -13,3 +13,8 @@ tabulate
 numpy
 sentence-transformers
 pytesseract
+Pillow
+python-pptx
+unstructured
+opencv-python
+ghostscript
