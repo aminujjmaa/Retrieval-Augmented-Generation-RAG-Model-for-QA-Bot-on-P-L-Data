@@ -12,3 +12,4 @@ tabula-py
 tabulate
 numpy
 sentence-transformers
+pytesseract
