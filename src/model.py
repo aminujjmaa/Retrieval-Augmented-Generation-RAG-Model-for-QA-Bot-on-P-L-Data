@@ -37,7 +37,9 @@ if not groq_api:
     raise ValueError("The 'groq_api' key is not set in the environment variables.")
 
 # Initialize embeddings and language model
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+# embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+embeddings = HuggingFaceEmbeddings(model_name="./local_model")
+
 llm = ChatGroq(groq_api_key=groq_api, model_name="Llama3-8b-8192")
 
 # Extract structured P&L data from PDFs
